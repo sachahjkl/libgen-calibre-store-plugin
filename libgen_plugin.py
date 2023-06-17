@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 # License: GPLv3 Copyright: 2023, poochinski9
 from __future__ import absolute_import, division, print_function, unicode_literals
+import sys
 
 import urllib.parse
 import time
@@ -16,7 +17,7 @@ from calibre.gui2.store.search_result import SearchResult
 from calibre.gui2.store.basic_config import BasicStoreConfig
 from calibre.gui2.store.web_store_dialog import WebStoreDialog
 
-BASE_URL = "https://libgen.is"
+BASE_URL = "https://libgen.li"
 USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko"
 
 #####################################################################
@@ -24,7 +25,7 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko"
 #####################################################################
 def search_libgen(query, max_results=10, timeout=60):
     res = "25" if max_results <= 25 else "50" if max_results <= 50 else "100"
-    search_url = f"{BASE_URL}/search.php?req={query.decode()}&res={res}&view=simple"
+    search_url = f"{BASE_URL}/index.php?req={query.decode()}&res={res}"
     print("searching: " + search_url)
     print("max results: " + str(max_results))
     br = browser(user_agent=USER_AGENT)
@@ -32,24 +33,33 @@ def search_libgen(query, max_results=10, timeout=60):
     soup = BeautifulSoup(raw, "html5lib")
 
     # Find the rows that represent each book, and skip the first item which is table headers
-    trs = soup.select('table[class="c"] > tbody > tr')[1:]
+    trs = soup.select('table#tablelibgen > tbody > tr')
+
+    print(len(trs))
 
     #map the trs to search results, filter out items that dont have a title or author, and limit it to max_results size
-    return [result for result in map(build_search_result, trs) if result.title and result.author][:max_results]
+    output = [result for result in map(build_search_result, trs) if result.title and result.author][:max_results]
+    return output
 
 def build_search_result(tr):
     tds = tr.select('td')
     s = SearchResult()
-    s.title = tds[2].select_one("a:last-of-type").text
-    s.author = tds[1].text
-    s.detail_item = BASE_URL + "/" + tds[2].select_one("a:last-of-type").get("href")
-    size = tds[7].text
-    pages = tds[5].text
-    year = tds[4].text
+    offset = int(tds[0]["colspan"] if tds[0].has_attr("colspan") else 1) - 1 
+
+    s.title = str.format("{} - {}",tds[0].select_one('a').text.replace('\n', '').strip(), tds[0].select_one('font').text.replace('\n', '').strip() )
+    s.author =  (tds[1 - offset].text if tds[1].text else "N/A") if 1 - offset >= 0 else "N/A"
+    s.detail_item = BASE_URL + "/" + tds[0 - offset].select_one("a:first-of-type").get("href") if 0 - offset >= 0 else "N/A"
+    year = tds[3 - offset].text if 3 - offset >= 0 else "N/A"
+    pages = tds[5 - offset].text if 5 - offset >= 0 else "N/A"
+    size = tds[6 - offset].text if 6 - offset >= 0 else "N/A"
     s.price = f"{size}\n{pages} pages\n{year}"  # use price column to display more size, pages, year
-    s.formats = tds[8].text.upper()
+    s.formats = tds[7 - offset].text.upper() if 7 - offset >= 0 else "N/A"
     s.drm = SearchResult.DRM_UNLOCKED
-    s.mirror1_url = tds[9].select_one("a:first-of-type").get("href")
+    s.mirror1_url = tds[8 - offset].select_one("a:first-of-type").get("href") if 8 - offset >= 0 else "N/A"
+
+    if s.mirror1_url[0] == "/":
+        s.mirror1_url = BASE_URL + s.mirror1_url
+
     return s
 
 
